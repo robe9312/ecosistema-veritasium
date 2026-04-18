@@ -1,0 +1,145 @@
+name: 🤖 Veritasium Trading Engine
+
+on:
+  schedule:
+    # Ejecuta cada 10 minutos, 24/7
+    - cron: '*/10 * * * *'
+  workflow_dispatch:
+    inputs:
+      mode:
+        description: 'Execution mode (live / dry-run)'
+        required: false
+        default: 'live'
+
+concurrency:
+  group: veritasium-trading
+  cancel-in-progress: false   # Nunca cancelar una sesión activa
+
+env:
+  OPENFANG_VERSION: "0.4.2"
+  RUST_LOG: "info"
+  CARGO_TERM_COLOR: always
+
+jobs:
+  trade:
+    name: 🧠 OpenFang · Recolector Hand
+    runs-on: ubuntu-latest
+    timeout-minutes: 9   # Evita overlap con el próximo cron
+
+    steps:
+      # ──────────────────────────────────────────────────────────────
+      # 1. Checkout del repositorio
+      # ──────────────────────────────────────────────────────────────
+      - name: 📥 Checkout Ecosistema-Veritasium
+        uses: actions/checkout@v4
+
+      # ──────────────────────────────────────────────────────────────
+      # 2. Cache de herramientas para acelerar ejecuciones futuras
+      # ──────────────────────────────────────────────────────────────
+      - name: 💾 Cache OpenFang binary
+        id: cache-openfang
+        uses: actions/cache@v4
+        with:
+          path: ~/.local/bin/openfang
+          key: openfang-${{ env.OPENFANG_VERSION }}-linux-x86_64
+
+      # ──────────────────────────────────────────────────────────────
+      # 3. Instalar OpenFang (si no está en caché)
+      # ──────────────────────────────────────────────────────────────
+      - name: 🔧 Install OpenFang Runtime
+        if: steps.cache-openfang.outputs.cache-hit != 'true'
+        run: |
+          set -euo pipefail
+          mkdir -p ~/.local/bin
+          echo "⬇️  Descargando OpenFang v${OPENFANG_VERSION}..."
+          curl -fsSL \
+            "https://github.com/openfang-ai/openfang/releases/download/v${OPENFANG_VERSION}/openfang-linux-x86_64.tar.gz" \
+            -o /tmp/openfang.tar.gz || {
+              echo "⚠️  Release no disponible, compilando desde fuente..."
+              sudo apt-get install -y --no-install-recommends \
+                build-essential pkg-config libssl-dev
+              curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y
+              source "$HOME/.cargo/env"
+              cargo install openfang --version "${OPENFANG_VERSION}" \
+                --root ~/.local --locked 2>/dev/null || \
+              cargo install openfang --root ~/.local --locked
+              exit 0
+            }
+          tar -xzf /tmp/openfang.tar.gz -C /tmp
+          mv /tmp/openfang ~/.local/bin/openfang
+          chmod +x ~/.local/bin/openfang
+          echo "✅ OpenFang instalado: $(~/.local/bin/openfang --version)"
+
+      - name: 📌 Add OpenFang to PATH
+        run: echo "$HOME/.local/bin" >> $GITHUB_PATH
+
+      # ──────────────────────────────────────────────────────────────
+      # 4. Restaurar base de datos SQLite de sesiones anteriores
+      # ──────────────────────────────────────────────────────────────
+      - name: 🗄️  Restore trading state (SQLite)
+        uses: actions/cache@v4
+        with:
+          path: |
+            .veritasium/state.db
+            .veritasium/logs/
+          key: veritasium-state-${{ github.run_id }}
+          restore-keys: |
+            veritasium-state-
+
+      - name: 📁 Ensure state directory exists
+        run: mkdir -p .veritasium/logs
+
+      # ──────────────────────────────────────────────────────────────
+      # 5. Validar secrets antes de operar (fail-fast)
+      # ──────────────────────────────────────────────────────────────
+      - name: 🔐 Validate required secrets
+        run: |
+          MISSING=0
+          [ -z "${{ secrets.GROQ_API_KEY }}" ]        && echo "❌ GROQ_API_KEY not set"        && MISSING=1
+          [ -z "${{ secrets.SOLANA_PRIVATE_KEY }}" ]  && echo "❌ SOLANA_PRIVATE_KEY not set"  && MISSING=1
+          [ -z "${{ secrets.SOLANA_RPC_URL }}" ]      && echo "❌ SOLANA_RPC_URL not set"       && MISSING=1
+          [ $MISSING -eq 1 ] && echo "Configura los secrets en Settings → Secrets and variables → Actions" && exit 1
+          echo "✅ Todos los secrets configurados correctamente."
+
+      # ──────────────────────────────────────────────────────────────
+      # 6. Ejecutar la mano Recolector en modo headless
+      # ──────────────────────────────────────────────────────────────
+      - name: 🚀 Run Recolector Hand (headless)
+        env:
+          GROQ_API_KEY:       ${{ secrets.GROQ_API_KEY }}
+          SOLANA_PRIVATE_KEY: ${{ secrets.SOLANA_PRIVATE_KEY }}
+          SOLANA_RPC_URL:     ${{ secrets.SOLANA_RPC_URL }}
+          PROFIT_WALLET:      ${{ secrets.PROFIT_WALLET }}
+          BOT_MODE:           ${{ github.event.inputs.mode || 'live' }}
+        run: |
+          echo "🌐 Modo: $BOT_MODE"
+          echo "🕐 Inicio: $(date -u +%Y-%m-%dT%H:%M:%SZ)"
+          openfang run \
+            --hand hands/recolector \
+            --config config.toml \
+            --state .veritasium/state.db \
+            --log-dir .veritasium/logs \
+            --headless \
+            --mode "$BOT_MODE"
+          echo "✅ Ciclo completado: $(date -u +%Y-%m-%dT%H:%M:%SZ)"
+
+      # ──────────────────────────────────────────────────────────────
+      # 7. Subir logs como artefactos descargables
+      # ──────────────────────────────────────────────────────────────
+      - name: 📊 Upload trading logs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: trade-logs-${{ github.run_number }}
+          path: .veritasium/logs/
+          retention-days: 7
+
+      # ──────────────────────────────────────────────────────────────
+      # 8. Notificación de error (opcional – requiere secret WEBHOOK_URL)
+      # ──────────────────────────────────────────────────────────────
+      - name: 🚨 Notify on failure
+        if: failure() && secrets.WEBHOOK_URL != ''
+        run: |
+          curl -s -X POST "${{ secrets.WEBHOOK_URL }}" \
+            -H "Content-Type: application/json" \
+            -d "{\"text\":\"⚠️ Veritasium fallo en run #${{ github.run_number }}. Revisa: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}\"}"

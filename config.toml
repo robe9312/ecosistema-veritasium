@@ -1,0 +1,146 @@
+# ============================================================
+#  config.toml — Configuración Global de OpenFang
+#  Ecosistema-Veritasium
+# ============================================================
+
+[openfang]
+version     = "0.4.2"
+project     = "Ecosistema-Veritasium"
+description = "Sistema de trading algorítmico autónomo sobre Solana Mainnet"
+
+# ──────────────────────────────────────────────────────────────
+# PROVEEDOR DE IA POR DEFECTO
+# ──────────────────────────────────────────────────────────────
+[ai]
+default_provider = "groq"
+
+[ai.providers.groq]
+type        = "openai_compatible"
+base_url    = "https://api.groq.com/openai/v1"
+api_key_env = "GROQ_API_KEY"
+default_model     = "llama-3.3-70b-versatile"
+fallback_model    = "llama-3.1-8b-instant"
+max_rpm           = 30
+max_tokens_per_min = 6000
+
+[ai.providers.groq.http]
+timeout_sec         = 60
+connect_timeout_sec = 10
+max_retries         = 3
+retry_backoff_ms    = 2000
+
+# ──────────────────────────────────────────────────────────────
+# PERSISTENCIA: SQLite
+# ──────────────────────────────────────────────────────────────
+[storage]
+backend = "sqlite"
+path    = ".veritasium/state.db"
+
+[storage.schema]
+auto_migrate = true
+
+[[storage.schema.tables]]
+name = "trades"
+sql  = """
+  CREATE TABLE IF NOT EXISTS trades (
+    id                    INTEGER PRIMARY KEY AUTOINCREMENT,
+    timestamp             TEXT    NOT NULL DEFAULT (datetime('now')),
+    action                TEXT    NOT NULL,
+    entry_price           REAL,
+    exit_price            REAL,
+    trade_size_sol        REAL,
+    profit_sol            REAL    DEFAULT 0,
+    z_score               REAL,
+    sma                   REAL,
+    std_dev               REAL,
+    txn_signature         TEXT,
+    profit_transfer_sol   REAL    DEFAULT 0,
+    profit_transfer_txn   TEXT,
+    cycle_notes           TEXT,
+    mode                  TEXT    DEFAULT 'live'
+  );
+"""
+
+[[storage.schema.tables]]
+name = "performance_metrics"
+sql  = """
+  CREATE TABLE IF NOT EXISTS performance_metrics (
+    date               TEXT    PRIMARY KEY,
+    total_trades       INTEGER DEFAULT 0,
+    winning_trades     INTEGER DEFAULT 0,
+    losing_trades      INTEGER DEFAULT 0,
+    win_rate           REAL    DEFAULT 0,
+    total_profit_sol   REAL    DEFAULT 0,
+    max_drawdown_sol   REAL    DEFAULT 0,
+    sharpe_approx      REAL    DEFAULT 0,
+    total_fees_sol     REAL    DEFAULT 0
+  );
+"""
+
+[[storage.schema.tables]]
+name = "pending_transfers"
+sql  = """
+  CREATE TABLE IF NOT EXISTS pending_transfers (
+    id              INTEGER PRIMARY KEY AUTOINCREMENT,
+    timestamp       TEXT    NOT NULL DEFAULT (datetime('now')),
+    amount_sol      REAL    NOT NULL,
+    accumulated_sol REAL    NOT NULL,
+    status          TEXT    DEFAULT 'pending'
+  );
+"""
+
+[[storage.schema.tables]]
+name = "open_positions"
+sql  = """
+  CREATE TABLE IF NOT EXISTS open_positions (
+    id               INTEGER PRIMARY KEY AUTOINCREMENT,
+    opened_at        TEXT    NOT NULL DEFAULT (datetime('now')),
+    direction        TEXT    NOT NULL,
+    entry_price      REAL    NOT NULL,
+    trade_size_sol   REAL    NOT NULL,
+    entry_txn        TEXT,
+    z_score_at_entry REAL,
+    status           TEXT    DEFAULT 'open'
+  );
+"""
+
+# ──────────────────────────────────────────────────────────────
+# LOGGING GLOBAL
+# ──────────────────────────────────────────────────────────────
+[logging]
+level     = "info"
+output    = "both"
+log_dir   = ".veritasium/logs"
+rotation  = "daily"
+max_files = 7
+format    = "json"
+
+# ──────────────────────────────────────────────────────────────
+# NOTIFICACIONES (OPCIONAL)
+# ──────────────────────────────────────────────────────────────
+[notifications]
+enabled             = false
+webhook_env         = "WEBHOOK_URL"
+notify_on_trade     = true
+notify_on_stop_loss = true
+notify_on_daily_limit = true
+notify_on_error     = true
+
+# ──────────────────────────────────────────────────────────────
+# MODO DE SEGURIDAD GLOBAL
+# ──────────────────────────────────────────────────────────────
+[safety]
+max_consecutive_errors = 5
+halt_on_rpc_failure    = true
+halt_on_low_balance    = true
+min_sol_reserve        = 0.02
+error_window_min       = 60
+
+# ──────────────────────────────────────────────────────────────
+# MANOS REGISTRADAS
+# ──────────────────────────────────────────────────────────────
+[[hands]]
+id          = "recolector"
+path        = "hands/recolector"
+enabled     = true
+description = "Bot 1 — Mean Reversion Z-Score SOL/USDC"

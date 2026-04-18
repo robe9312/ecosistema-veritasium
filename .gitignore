@@ -1,0 +1,58 @@
+# ─── Seguridad (NUNCA subir a Git) ───────────────────────────
+*.key
+*.pem
+*.p12
+*.pfx
+.env
+.env.*
+!.env.example
+trading-wallet.json
+*private*
+*secret*
+
+# ─── Estado de la base de datos (gestionado via GitHub Cache) ─
+.veritasium/
+*.db
+*.db-shm
+*.db-wal
+
+# ─── Binarios de OpenFang ─────────────────────────────────────
+openfang
+openfang.exe
+
+# ─── Logs locales ─────────────────────────────────────────────
+logs/
+*.log
+
+# ─── Rust / Cargo ─────────────────────────────────────────────
+/target/
+Cargo.lock
+**/*.rs.bk
+*.pdb
+
+# ─── Sistema Operativo ────────────────────────────────────────
+Thumbs.db
+Desktop.ini
+$RECYCLE.BIN/
+.DS_Store
+.AppleDouble
+._*
+*~
+
+# ─── Editores e IDEs ──────────────────────────────────────────
+.vscode/
+.idea/
+*.swp
+*.swo
+.cursor/
+
+# ─── Node.js ──────────────────────────────────────────────────
+node_modules/
+dist/
+build/
+
+# ─── Python ───────────────────────────────────────────────────
+__pycache__/
+*.py[cod]
+.venv/
+venv/

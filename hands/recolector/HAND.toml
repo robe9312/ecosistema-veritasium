@@ -1,0 +1,100 @@
+# ============================================================
+#  HAND.toml — Manifiesto del Bot 1: Recolector
+#  Ecosistema-Veritasium · OpenFang Runtime
+# ============================================================
+
+[hand]
+name        = "Recolector"
+version     = "1.0.0"
+description = "Bot de Mean Reversion SOL/USDC sobre Solana Mainnet usando Z-Score estadístico."
+author      = "Ecosistema-Veritasium"
+
+# Archivos principales del hand
+prompt_file = "prompt.txt"
+skill_file  = "SKILL.md"
+
+# ──────────────────────────────────────────────────────────────
+# SCHEDULE
+# ──────────────────────────────────────────────────────────────
+[schedule]
+# Cada 10 minutos (coordinado con el cron del workflow)
+cron        = "*/10 * * * *"
+timezone    = "UTC"
+timeout_sec = 480   # Máximo 8 minutos de ejecución por ciclo
+
+# ──────────────────────────────────────────────────────────────
+# PROVEEDOR DE IA
+# ──────────────────────────────────────────────────────────────
+[provider]
+name        = "groq"
+model       = "llama-3.3-70b-versatile"
+temperature = 0.1
+max_tokens  = 4096
+top_p       = 0.9
+base_url    = "https://api.groq.com/openai/v1"
+
+[provider.retry]
+max_attempts = 3
+backoff_ms   = 2000
+jitter       = true
+
+# ──────────────────────────────────────────────────────────────
+# BLOCKCHAIN: SOLANA MAINNET
+# ──────────────────────────────────────────────────────────────
+[blockchain]
+network     = "mainnet-beta"
+
+[blockchain.tokens]
+sol_mint    = "So11111111111111111111111111111111111111112"
+usdc_mint   = "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v"
+
+[blockchain.dex]
+aggregator  = "jupiter"
+api_url     = "https://quote-api.jup.ag/v6"
+slippage_bps = 50
+
+# ──────────────────────────────────────────────────────────────
+# GESTIÓN DE RIESGO (CRÍTICO)
+# ──────────────────────────────────────────────────────────────
+[risk]
+max_trade_sol        = 0.1
+max_position_sol     = 0.25
+daily_loss_limit_sol = 0.05
+max_drawdown_pct     = 15.0
+stop_loss_sigma      = 3.5
+take_profit_sigma    = 2.0
+cooldown_after_stop_min = 30
+
+# ──────────────────────────────────────────────────────────────
+# PARÁMETROS ESTADÍSTICOS (Mean Reversion)
+# ──────────────────────────────────────────────────────────────
+[strategy]
+name             = "mean_reversion_zscore"
+lookback_minutes = 100
+buy_threshold    = -2.0
+sell_threshold   =  2.0
+min_volume_sol   = 1000.0
+
+# ──────────────────────────────────────────────────────────────
+# DISTRIBUCIÓN DE GANANCIAS
+# ──────────────────────────────────────────────────────────────
+[profit_distribution]
+bot3_share_pct    = 20.0
+min_profit_to_transfer_sol = 0.001
+
+# ──────────────────────────────────────────────────────────────
+# PERSISTENCIA Y LOGGING
+# ──────────────────────────────────────────────────────────────
+[state]
+backend      = "sqlite"
+db_path      = ".veritasium/state.db"
+log_trades   = true
+log_level    = "info"
+
+# ──────────────────────────────────────────────────────────────
+# MODO DE OPERACIÓN
+# ──────────────────────────────────────────────────────────────
+[execution]
+mode         = "${BOT_MODE}"
+confirm_txn  = false
+max_retries  = 3
