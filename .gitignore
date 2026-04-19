@@ -10,7 +10,7 @@ trading-wallet.json
 *private*
 *secret*
 
-# ─── Estado de la base de datos (gestionado via GitHub Cache) ─
+# ─── Estado de la base de datos (se gestiona via GitHub Cache) ─
 .veritasium/
 *.db
 *.db-shm
@@ -19,40 +19,59 @@ trading-wallet.json
 # ─── Binarios de OpenFang ─────────────────────────────────────
 openfang
 openfang.exe
+~/.local/bin/openfang
 
 # ─── Logs locales ─────────────────────────────────────────────
 logs/
 *.log
 
-# ─── Rust / Cargo ─────────────────────────────────────────────
+# ─── Rust / Cargo (si compilas localmente) ────────────────────
 /target/
 Cargo.lock
 **/*.rs.bk
 *.pdb
 
 # ─── Sistema Operativo ────────────────────────────────────────
+# Windows
 Thumbs.db
+ehthumbs.db
 Desktop.ini
 $RECYCLE.BIN/
+*.lnk
+
+# macOS
 .DS_Store
 .AppleDouble
+.LSOverride
 ._*
+.Spotlight-V100
+.Trashes
+
+# Linux
 *~
+.nfs*
 
 # ─── Editores e IDEs ──────────────────────────────────────────
 .vscode/
 .idea/
 *.swp
 *.swo
+*.sublime-workspace
+*.sublime-project
 .cursor/
 
-# ─── Node.js ──────────────────────────────────────────────────
+# ─── Node.js (si se agrega dashboard en el futuro) ────────────
 node_modules/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
 dist/
 build/
 
-# ─── Python ───────────────────────────────────────────────────
+# ─── Python (scripts auxiliares) ──────────────────────────────
 __pycache__/
 *.py[cod]
+*$py.class
+*.egg-info/
 .venv/
 venv/

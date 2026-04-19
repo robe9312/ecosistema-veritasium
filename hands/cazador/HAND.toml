@@ -1,0 +1,51 @@
+# ============================================================
+#  HAND.toml — Manifiesto del Bot 3: Cazador
+#  Ecosistema-Veritasium · Power Law Hand
+# ============================================================
+
+[hand]
+name        = "Cazador"
+version     = "1.0.0"
+description = "Bot de detección de Eventos Extremos (Black Swans) usando fractalidad."
+author      = "Ecosistema-Veritasium"
+
+# Archivos
+prompt_file = "prompt.txt"
+skill_file  = "SKILL.md"
+
+[schedule]
+# Cada hora (desfasado 5 min del Multiplicador para balancear carga)
+cron        = "5 * * * *"
+timezone    = "UTC"
+timeout_sec = 600
+
+[provider]
+name        = "groq"
+model       = "llama-3.3-70b-versatile"
+temperature = 0.0 # Determinismo máximo para análisis fractal
+
+[blockchain]
+network     = "mainnet-beta"
+
+[blockchain.tokens]
+sol_mint    = "So11111111111111111111111111111111111111112"
+usdc_mint   = "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v"
+
+[risk]
+# Solo opera con el balance de RISK_HUNTER_WALLET
+# El tamaño de posición es agresivo pero solo usa el 'colchón'
+max_trade_sol        = 0.5
+ratio_risk_reward    = 20.0     # Objetivo 1:20
+
+[strategy]
+name             = "power_law_swan"
+lookback_hours   = 200          # Ventana amplia para Hurst dinámico
+min_kurtosis     = 5.0          # Umbral de 'colas pesadas'
+
+[state]
+backend      = "sqlite"
+db_path      = ".veritasium/state.db"
+
+[execution]
+mode         = "${BOT_MODE}"
+confirm_txn  = false

@@ -4,7 +4,7 @@
 # ============================================================
 
 [openfang]
-version     = "0.4.2"
+version     = "0.5.10"
 project     = "Ecosistema-Veritasium"
 description = "Sistema de trading algorítmico autónomo sobre Solana Mainnet"
 
@@ -17,16 +17,18 @@ default_provider = "groq"
 [ai.providers.groq]
 type        = "openai_compatible"
 base_url    = "https://api.groq.com/openai/v1"
+# La API key se inyecta desde la variable de entorno GROQ_API_KEY
 api_key_env = "GROQ_API_KEY"
 default_model     = "llama-3.3-70b-versatile"
-fallback_model    = "llama-3.1-8b-instant"
-max_rpm           = 30
-max_tokens_per_min = 6000
+fallback_model    = "llama-3.1-8b-instant"   # Modelo de respaldo si hay rate limit
+max_rpm           = 30        # Requests por minuto (capa gratuita de Groq)
+max_tokens_per_min = 6000     # Límite de tokens por minuto (capa gratuita)
 
+# Configuración del cliente HTTP
 [ai.providers.groq.http]
-timeout_sec         = 60
+timeout_sec   = 60
 connect_timeout_sec = 10
-max_retries         = 3
+max_retries   = 3
 retry_backoff_ms    = 2000
 
 # ──────────────────────────────────────────────────────────────
@@ -36,16 +38,18 @@ retry_backoff_ms    = 2000
 backend = "sqlite"
 path    = ".veritasium/state.db"
 
+# Esquema de tablas a crear automáticamente al iniciar
 [storage.schema]
 auto_migrate = true
 
 [[storage.schema.tables]]
-name = "trades"
-sql  = """
+name   = "trades"
+sql    = """
   CREATE TABLE IF NOT EXISTS trades (
     id                    INTEGER PRIMARY KEY AUTOINCREMENT,
     timestamp             TEXT    NOT NULL DEFAULT (datetime('now')),
-    action                TEXT    NOT NULL,
+    hand_id               TEXT    NOT NULL,   -- recolector | multiplicador | cazador
+    action                TEXT    NOT NULL,   -- BUY | SELL | STOP_LOSS | HOLD
     entry_price           REAL,
     exit_price            REAL,
     trade_size_sol        REAL,
@@ -53,17 +57,23 @@ sql  = """
     z_score               REAL,
     sma                   REAL,
     std_dev               REAL,
+    hurst                 REAL,
+    kurtosis              REAL,
+    sentiment             TEXT,
+    sentiment_score       INTEGER,
+    confidence_score      REAL,
     txn_signature         TEXT,
     profit_transfer_sol   REAL    DEFAULT 0,
     profit_transfer_txn   TEXT,
+    profit_transfer_dst   TEXT,               -- RISK_HUNTER | PROFIT_WALLET
     cycle_notes           TEXT,
-    mode                  TEXT    DEFAULT 'live'
+    mode                  TEXT    DEFAULT 'live'  -- live | dry-run
   );
 """
 
 [[storage.schema.tables]]
-name = "performance_metrics"
-sql  = """
+name   = "performance_metrics"
+sql    = """
   CREATE TABLE IF NOT EXISTS performance_metrics (
     date               TEXT    PRIMARY KEY,
     total_trades       INTEGER DEFAULT 0,
@@ -78,29 +88,29 @@ sql  = """
 """
 
 [[storage.schema.tables]]
-name = "pending_transfers"
-sql  = """
+name   = "pending_transfers"
+sql    = """
   CREATE TABLE IF NOT EXISTS pending_transfers (
-    id              INTEGER PRIMARY KEY AUTOINCREMENT,
-    timestamp       TEXT    NOT NULL DEFAULT (datetime('now')),
-    amount_sol      REAL    NOT NULL,
-    accumulated_sol REAL    NOT NULL,
-    status          TEXT    DEFAULT 'pending'
+    id                 INTEGER PRIMARY KEY AUTOINCREMENT,
+    timestamp          TEXT    NOT NULL DEFAULT (datetime('now')),
+    amount_sol         REAL    NOT NULL,
+    accumulated_sol    REAL    NOT NULL,
+    status             TEXT    DEFAULT 'pending'  -- pending | sent
   );
 """
 
 [[storage.schema.tables]]
-name = "open_positions"
-sql  = """
+name   = "open_positions"
+sql    = """
   CREATE TABLE IF NOT EXISTS open_positions (
-    id               INTEGER PRIMARY KEY AUTOINCREMENT,
-    opened_at        TEXT    NOT NULL DEFAULT (datetime('now')),
-    direction        TEXT    NOT NULL,
-    entry_price      REAL    NOT NULL,
-    trade_size_sol   REAL    NOT NULL,
-    entry_txn        TEXT,
-    z_score_at_entry REAL,
-    status           TEXT    DEFAULT 'open'
+    id                 INTEGER PRIMARY KEY AUTOINCREMENT,
+    opened_at          TEXT    NOT NULL DEFAULT (datetime('now')),
+    direction          TEXT    NOT NULL,   -- long | short (actualmente solo long)
+    entry_price        REAL    NOT NULL,
+    trade_size_sol     REAL    NOT NULL,
+    entry_txn          TEXT,
+    z_score_at_entry   REAL,
+    status             TEXT    DEFAULT 'open'  -- open | closed
   );
 """
 
@@ -108,39 +118,54 @@ sql  = """
 # LOGGING GLOBAL
 # ──────────────────────────────────────────────────────────────
 [logging]
-level     = "info"
-output    = "both"
-log_dir   = ".veritasium/logs"
-rotation  = "daily"
-max_files = 7
-format    = "json"
+level       = "info"       # debug | info | warn | error
+output      = "both"       # stdout | file | both
+log_dir     = ".veritasium/logs"
+rotation    = "daily"
+max_files   = 7            # Mantener 7 días de logs
+format      = "json"       # json | text
 
 # ──────────────────────────────────────────────────────────────
 # NOTIFICACIONES (OPCIONAL)
 # ──────────────────────────────────────────────────────────────
 [notifications]
-enabled             = false
-webhook_env         = "WEBHOOK_URL"
-notify_on_trade     = true
-notify_on_stop_loss = true
+enabled               = false   # Activar si tienes WEBHOOK_URL configurado
+webhook_env           = "WEBHOOK_URL"
+notify_on_trade       = true
+notify_on_stop_loss   = true
 notify_on_daily_limit = true
-notify_on_error     = true
+notify_on_error       = true
 
 # ──────────────────────────────────────────────────────────────
 # MODO DE SEGURIDAD GLOBAL
 # ──────────────────────────────────────────────────────────────
 [safety]
+# Si ocurren N errores consecutivos, detener el bot hasta revisión manual
 max_consecutive_errors = 5
 halt_on_rpc_failure    = true
 halt_on_low_balance    = true
-min_sol_reserve        = 0.02
+min_sol_reserve        = 0.02   # Mantener siempre este SOL para fees
+
+# Ventana de tiempo para reset de contadores de error
 error_window_min       = 60
 
 # ──────────────────────────────────────────────────────────────
 # MANOS REGISTRADAS
 # ──────────────────────────────────────────────────────────────
 [[hands]]
-id          = "recolector"
-path        = "hands/recolector"
-enabled     = true
-description = "Bot 1 — Mean Reversion Z-Score SOL/USDC"
+id      = "recolector"
+path    = "hands/recolector"
+enabled = true
+description = "Bot 1 — Mean Reversion Z-Score (Normal Distribution)"
+
+[[hands]]
+id      = "multiplicador"
+path    = "hands/multiplicador"
+enabled = true
+description = "Bot 2 — Trend Following (Log-Normal Distribution)"
+
+[[hands]]
+id      = "cazador"
+path    = "hands/cazador"
+enabled = true
+description = "Bot 3 — Eventos Extremos (Ley de Potencia)"

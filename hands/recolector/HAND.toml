@@ -28,11 +28,14 @@ timeout_sec = 480   # Máximo 8 minutos de ejecución por ciclo
 [provider]
 name        = "groq"
 model       = "llama-3.3-70b-versatile"
-temperature = 0.1
+temperature = 0.1          # Bajo para respuestas deterministas y analíticas
 max_tokens  = 4096
 top_p       = 0.9
+
+# Endpoint oficial de Groq (sin costo en capa gratuita)
 base_url    = "https://api.groq.com/openai/v1"
 
+# Política de reintentos ante errores de API
 [provider.retry]
 max_attempts = 3
 backoff_ms   = 2000
@@ -43,26 +46,38 @@ jitter       = true
 # ──────────────────────────────────────────────────────────────
 [blockchain]
 network     = "mainnet-beta"
+# RPC_URL se inyecta desde el secret SOLANA_RPC_URL
 
+# Tokens involucrados
 [blockchain.tokens]
 sol_mint    = "So11111111111111111111111111111111111111112"
 usdc_mint   = "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v"
 
+# Agregador de liquidez
 [blockchain.dex]
 aggregator  = "jupiter"
 api_url     = "https://quote-api.jup.ag/v6"
-slippage_bps = 50
+slippage_bps = 50   # 0.5% de slippage máximo
 
 # ──────────────────────────────────────────────────────────────
 # GESTIÓN DE RIESGO (CRÍTICO)
 # ──────────────────────────────────────────────────────────────
 [risk]
-max_trade_sol        = 0.1
-max_position_sol     = 0.25
-daily_loss_limit_sol = 0.05
-max_drawdown_pct     = 15.0
-stop_loss_sigma      = 3.5
-take_profit_sigma    = 2.0
+# Tamaño máximo de cada operación individual
+max_trade_sol        = 0.1      # ≈ $15–20 USD según precio actual
+
+# Capital máximo en riesgo simultáneo
+max_position_sol     = 0.25     # Nunca tener más de 0.25 SOL en posiciones abiertas
+
+# Límites de pérdida diarios
+daily_loss_limit_sol = 0.05     # Detiene el bot si pierde > 0.05 SOL en el día
+max_drawdown_pct     = 15.0     # Stop total si equity cae > 15% del balance inicial
+
+# Stop-Loss y Take-Profit dinámicos (en σ)
+stop_loss_sigma      = 3.5      # Cierra posición si Z-Score cae a -3.5σ
+take_profit_sigma    = 2.0      # Cierra posición al volver a 0 + 0.5σ adicional
+
+# Enfriamiento tras stop-loss
 cooldown_after_stop_min = 30
 
 # ──────────────────────────────────────────────────────────────
@@ -70,17 +85,20 @@ cooldown_after_stop_min = 30
 # ──────────────────────────────────────────────────────────────
 [strategy]
 name             = "mean_reversion_zscore"
-lookback_minutes = 100
-buy_threshold    = -2.0
-sell_threshold   =  2.0
-min_volume_sol   = 1000.0
+lookback_minutes = 100          # Ventana de cálculo MA y StdDev
+buy_threshold    = -2.0         # Comprar cuando Z-Score < -2σ
+sell_threshold   =  2.0         # Vender cuando Z-Score > +2σ
+min_volume_sol   = 1000.0       # Volumen mínimo para considerar la señal válida
 
 # ──────────────────────────────────────────────────────────────
 # DISTRIBUCIÓN DE GANANCIAS
 # ──────────────────────────────────────────────────────────────
 [profit_distribution]
+# 20% de cada ganancia se transfiere automáticamente al Bot 3
 bot3_share_pct    = 20.0
-min_profit_to_transfer_sol = 0.001
+# Dirección de la billetera del Bot 3 (se inyecta desde secret PROFIT_WALLET)
+# bot3_wallet     = "${PROFIT_WALLET}"
+min_profit_to_transfer_sol = 0.001   # Solo transferir si la ganancia supera este umbral
 
 # ──────────────────────────────────────────────────────────────
 # PERSISTENCIA Y LOGGING
@@ -89,12 +107,13 @@ min_profit_to_transfer_sol = 0.001
 backend      = "sqlite"
 db_path      = ".veritasium/state.db"
 log_trades   = true
-log_level    = "info"
+log_level    = "info"           # debug | info | warn | error
 
 # ──────────────────────────────────────────────────────────────
 # MODO DE OPERACIÓN
 # ──────────────────────────────────────────────────────────────
 [execution]
-mode         = "${BOT_MODE}"
-confirm_txn  = false
-max_retries  = 3
+# "live" = opera con dinero real | "dry-run" = simula sin transacciones
+mode         = "${BOT_MODE}"    # Inyectado desde la variable de entorno del workflow
+confirm_txn  = false            # Sin confirmación manual (headless)
+max_retries  = 3                # Reintentos por transacción fallida

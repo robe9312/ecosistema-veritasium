@@ -10,7 +10,7 @@
 
 ### 1.1 Distribución Normal y la Regla Empírica
 
-En mercados eficientes, los **retornos** tienden a distribuirse aproximadamente de forma normal:
+En mercados eficientes, los **retornos** (no los precios) tienden a distribuirse aproximadamente de forma normal. Esto nos permite usar la estadística paramétrica:
 
 ```
 Regla Empírica (68-95-99.7):
@@ -19,59 +19,95 @@ Regla Empírica (68-95-99.7):
   ±3σ  → 99.73% de las observaciones
 ```
 
-> ⚠️ Los precios de criptoactivos son **leptocúrticos** (colas gordas). Por eso usamos -2σ y no -1.5σ.
+**Implicación para trading:** Si el precio está a -2σ de la media, estadísticamente solo ocurre el 2.28% del tiempo. La probabilidad de reversión a la media es alta.
 
-### 1.2 Z-Score
+> ⚠️ **Caveat crítico:** Los precios de criptoactivos son **leptocúrticos** (colas gordas). Hay más eventos extremos de lo que predice la normal pura. Por eso usamos σ < -2.0 y no -1.5 como umbral.
+
+### 1.2 Z-Score (Puntuación Estándar)
 
 ```
 Z = (X - μ) / σ
 
-X = precio actual
-μ = SMA de los últimos N periodos
-σ = desviación estándar del periodo
-
-Z = 0:  precio en la media → equilibrio
-Z = -2: sobreventa probable
-Z = +2: sobrecompra probable
+Donde:
+  X  = precio actual
+  μ  = media de los últimos N periodos (SMA)
+  σ  = desviación estándar de los últimos N periodos
 ```
 
-### 1.3 Desviación Estándar de la Muestra (usar N-1)
+**Interpretación:**
+- Z = 0: precio exactamente en la media → equilibrio
+- Z = -2: precio 2 desviaciones por debajo → posible sobreventa
+- Z = +2: precio 2 desviaciones por encima → posible sobrecompra
+
+### 1.3 Media Móvil Simple (SMA) vs Exponencial (EMA)
+
+| | SMA | EMA |
+|---|---|---|
+| Reacción a cambios | Lenta, uniforme | Rápida, pondera más el presente |
+| Para mean reversion | ✅ Mejor (evita over-fitting) | ❌ Puede crear señales falsas |
+| Lag | Mayor | Menor |
+
+**Usamos SMA-100** porque la mean reversion requiere una media estable que represente el precio "justo" de largo plazo en la ventana de análisis.
+
+### 1.4 Desviación Estándar de la Muestra vs Población
 
 ```python
-# Siempre usar corrección de Bessel para muestras:
-σ = sqrt(Σ(xi - x_bar)^2 / (N-1))
+# Población (conoces todos los datos):
+σ_población = sqrt(Σ(xi - μ)² / N)
+
+# Muestra (trabajas con un subconjunto):
+σ_muestra   = sqrt(Σ(xi - x̄)² / (N-1))  ← USAR ESTA (N-1 = corrección de Bessel)
 ```
+
+Cuando trabajamos con ventanas de precios, **siempre usamos N-1** porque la muestra (100 velas) es una representación de una distribución subyacente mayor.
 
 ---
 
-## 2. MEAN REVERSION: FUNDAMENTOS
+## 2. ESTRATEGIA MEAN REVERSION: FUNDAMENTOS
 
-### 2.1 ¿Qué es?
+### 2.1 ¿Qué es Mean Reversion?
 
-Activos que se desvían de su media histórica tienden a regresar a ella.
+La hipótesis de mean reversion establece que los activos que se desvían significativamente de su valor promedio histórico tienen una tendencia probabilística a regresar a ese promedio. Es el opuesto a las estrategias de momentum.
 
-**Funciona mejor en:**
-- Mercados ranging (sin tendencia clara)
-- Alta liquidez
-- Baja volatilidad macro
+**Condiciones donde funciona mejor:**
+- Mercados con alta liquidez y baja tendencia (ranging)
+- Pares con alta correlación con su propio promedio histórico
+- Periodos de baja volatilidad macroeconómica
 
-**FALLA en:**
-- Tendencias fuertes (breakouts)
-- Cisnes negros
-- Baja liquidez
+**Condiciones donde FALLA:**
+- Mercados en tendencia fuerte (breakouts)
+- Eventos de cisne negro (FTX collapse, regulaciones inesperadas)
+- Baja liquidez (spreads amplios y manipulación de precios)
 
-### 2.2 Half-Life de Mean Reversion
+### 2.2 El Problema de la No-Estacionariedad
+
+Los precios de criptoactivos NO son estacionarios en el largo plazo. Sin embargo, en ventanas cortas (100 minutos), podemos asumir **quasi-estacionariedad local**.
+
+```
+Test de Augmented Dickey-Fuller (ADF):
+  - H₀: La serie tiene raíz unitaria (no estacionaria)
+  - Si p-valor < 0.05: rechazar H₀ → serie estacionaria → mean reversion válida
+  - Si p-valor > 0.05: no rechazar H₀ → cuidado con señales falsas
+```
+
+> **Nota práctica:** En ventanas de 100 minutos, SOL/USDC generalmente pasa el test ADF, especialmente en rangos de precios estables.
+
+### 2.3 Half-Life de Mean Reversion
+
+El half-life indica cuánto tiempo tarda el precio en recorrer la mitad de la distancia hacia la media:
 
 ```
 half_life = -ln(2) / β
 
-β = coeficiente del proceso Ornstein-Uhlenbeck:
+Donde β es el coeficiente del proceso de Ornstein-Uhlenbeck:
   ΔPt = α + β * Pt-1 + εt
 
-Si β entre -0.1 y -0.001 → existe mean reversion
+Si β está entre -0.1 y -0.001:
+  → Existe mean reversion
+  → half_life = tiempo esperado de la operación
 ```
 
-Para SOL en baja volatilidad: half-life típico = **15-45 minutos**.
+Para SOL en periodos de baja volatilidad, el half-life típico es de **15-45 minutos**.
 
 ---
 
@@ -79,105 +115,158 @@ Para SOL en baja volatilidad: half-life típico = **15-45 minutos**.
 
 ### 3.1 Kelly Criterion
 
+El Kelly Criterion determina el tamaño óptimo de posición que maximiza el crecimiento del capital a largo plazo:
+
 ```
 Kelly% = W - (1-W)/R
 
-W = win rate
-R = reward/risk ratio
+Donde:
+  W = Probabilidad de ganancia (win rate)
+  R = Razón de ganancia/pérdida (reward/risk ratio)
 
-Kelly fraccional (recomendado):
-  f* = Kelly% * 0.5  ← reducir volatilidad del capital
+Kelly fraccional (recomendado para criptoactivos):
+  f* = Kelly% * 0.5   ← usar 50% del Kelly para reducir volatilidad
 ```
 
-### 3.2 Value at Risk (VaR 95%)
+**Ejemplo:**
+- Win rate = 60%, R = 1.5
+- Kelly% = 0.60 - 0.40/1.5 = 0.60 - 0.267 = 0.333 = 33.3%
+- Kelly fraccional = 16.65% del capital por operación
+
+### 3.2 Value at Risk (VaR) Simplificado
 
 ```
 VaR(95%) = μ_retorno - 1.645 * σ_retorno
+
+Interpretación: Con 95% de probabilidad, la pérdida máxima en 
+un periodo no superará el VaR calculado.
 ```
 
-### 3.3 Ratio de Sharpe
+El bot limita operaciones cuando el VaR proyectado supera el `daily_loss_limit_sol`.
+
+### 3.3 Ratio de Sharpe (Aproximado)
 
 ```
-Sharpe = retorno_promedio / σ_retornos
+Sharpe = (Retorno_promedio_por_ciclo - Tasa_libre_riesgo) / σ_retornos
 
-Sharpe > 1.0 = aceptable
-Sharpe > 2.0 = excelente (intraday)
+Un Sharpe > 1.0 es aceptable
+Un Sharpe > 2.0 es excelente para estrategias intraday
 ```
+
+El agente calcula una aproximación del Sharpe al final de cada jornada con los datos históricos en SQLite.
 
 ---
 
 ## 4. LEYES DE POTENCIA EN CRIPTO
 
-### 4.1 Fat Tails
+### 4.1 Distribuciones de Cola Gorda (Fat Tails)
+
+Los mercados de criptoactivos siguen distribuciones de **ley de potencia** para eventos extremos, no distribuciones normales:
 
 ```
 P(X > x) ≈ x^(-α)
 
-α para BTC/SOL ≈ 2.5 - 3.5
-(distribución normal tendría α → ∞)
+Donde α (alpha de cola) para BTC/SOL ≈ 2.5 - 3.5
+(normal tendría α → ∞)
 ```
 
-Los eventos de -4σ, -5σ ocurren más frecuentemente de lo esperado.
-El stop-loss en -3.5σ es crítico.
+**Implicación directa para RECOLECTOR:**
+- Los eventos de -4σ, -5σ ocurren con frecuencia MUCHO mayor de lo esperado
+- El stop-loss en -3.5σ es crítico: evita la catástrofe de la cola
 
-### 4.2 Ley de Pareto
+### 4.2 La Ley de Pareto en Trading
 
-80% de las ganancias vienen del 20% de las operaciones:
-- No forzar señales
-- Dejar correr las ganancias
-- Cortar rápido las pérdidas
+El 80% de las ganancias suelen venir del 20% de las operaciones. Esto implica:
+- No aumentar la frecuencia de operaciones artificialmente
+- Dejar correr las ganancias (sell en +2σ, no antes)
+- Cortar rápido las pérdidas (stop-loss estricto)
+
+### 4.3 Hipótesis del Mercado Fractal (HMF)
+
+A diferencia de la HME (Hipótesis del Mercado Eficiente), la HMF de Mandelbrot postula que los mercados son autosimilares a diferentes escalas temporales. 
+
+**Aplicación práctica:** Los niveles de soporte y resistencia en marcos temporales mayores (1h, 4h) influyen en las señales de 1m. Al calcular el Z-Score de 100 minutos, estamos capturando la dinámica fractal del mercado a nivel intraday.
 
 ---
 
-## 5. JUPITER DEX
+## 5. COMPORTAMIENTO DE JUPITER DEX
 
-### 5.1 Price Impact
-
-```
-price_impact = |precio_real - precio_ref| / precio_ref * 100
-Regla: RECHAZAR si price_impact > 1.0%
-```
-
-### 5.2 P&L real post-fees
+### 5.1 Precio de Impacto (Price Impact)
 
 ```
-profit_neto = (precio_venta - precio_compra) * cantidad_sol
+price_impact = |precio_real_swap - precio_referencia| / precio_referencia * 100
+
+Regla del bot: NUNCA ejecutar si price_impact > 1.0%
+```
+
+### 5.2 Slippage vs Price Impact
+
+| Concepto | Definición | Control |
+|----------|-----------|---------|
+| **Slippage** | Diferencia entre precio esperado y ejecutado | `slippageBps = 50` (0.5%) |
+| **Price Impact** | Efecto de tu orden en el precio de mercado | Tamaño máximo de operación |
+| **Fees** | Comisiones de protocolo y red | ~0.001 SOL por txn en Solana |
+
+### 5.3 Cálculo real de P&L post-fees
+
+```
+profit_neto = (precio_venta * cantidad_sol) 
+            - (precio_compra * cantidad_sol)
             - (fees_compra + fees_venta)
             - (slippage_compra + slippage_venta)
 
-fee_rate SOL ≈ 0.001-0.003% por trade
+Umbral de rentabilidad:
+  precio_venta > precio_compra * (1 + 2*fee_rate + min_profit_target)
 ```
 
----
-
-## 6. CONTEXTO SOL/USDC
-
-- **Alta liquidez:** UTC 13:00-21:00 (sesión americana)
-- **Baja liquidez:** UTC 00:00-08:00
-- **Volatilidad diaria:** 3-8%
-- **Correlación BTC:** ~0.7-0.9
-
-**Mayor efectividad mean reversion:**
-- UTC 05:00-09:00 y 14:00-18:00
-- Mercado ranging sin noticias macro
-
-**Riesgos Solana:**
-1. Congestión de red → max_retries = 3
-2. Jupiter sin ruta → verificar out_amount antes de firmar
-3. MEV front-running → slippage 0.5% nos protege
+Para SOL en Solana: fee_rate ≈ 0.001 SOL (~0.001-0.003% del trade según tamaño).
 
 ---
 
-## 7. PRINCIPIOS DEL TRADING CUANTITATIVO
+## 6. CONTEXTO DEL MERCADO SOL/USDC
 
-> "El mercado puede permanecer irracional más tiempo del que puedes permanecer solvente." — Keynes
+### 6.1 Características del Mercado
 
-1. **Disciplina estadística sobre intuición**
-2. **Gestión de riesgo primero** — la supervivencia del capital es prioritaria
-3. **Humildad epistémica** — los modelos son aproximaciones
-4. **Consistencia sobre brillantez** — Sharpe 1.5 sostenido > ganancia única del 100%
-5. **Asimetría del riesgo** — perder 50% requiere ganar 100% para recuperarse
+- **Liquidez:** Alta en horario UTC 13:00-21:00 (sesión americana), baja en UTC 00:00-08:00
+- **Volatilidad diaria:** Típicamente 3-8% (alta estabilidad comparada con altcoins)
+- **Correlación con BTC:** ~0.7-0.9 (alta) → los movimientos de BTC afectan SOL
+- **Volatilidad implícita:** Aumenta cerca de eventos macro (Fed, CPI, NFP)
+
+### 6.2 Horas de Mayor Efectividad para Mean Reversion
+
+La estrategia funciona mejor en:
+- Mercados sin tendencia clara (range-bound)
+- Volatilidad moderada (σ entre 0.5% y 3% de SMA)
+- Horario: UTC 05:00-09:00 y UTC 14:00-18:00 (transiciones de sesión)
+
+La estrategia tiene MENOR efectividad en:
+- Apertura/cierre de mercados de futuros de CME (UTC 22:00)
+- Primeros 30 minutos tras datos macro importantes
+- Fin de semana (menor liquidez institucional)
+
+### 6.3 Factores de Riesgo Específicos de Solana
+
+1. **Congestión de red:** Solana puede tener transacciones fallidas en momentos de alta demanda. El bot tiene max_retries = 3.
+2. **Validators downtime:** Raro pero posible. Verificar que el RPC endpoint responda antes de operar.
+3. **Jupiter routing:** El agregador puede no encontrar ruta óptima. Verificar out_amount antes de firmar.
+4. **MEV (Maximal Extractable Value):** Bots de front-running pueden afectar el slippage. El límite de 0.5% slippage nos protege.
 
 ---
 
-*SKILL.md — Veritasium v1.0.0*
+## 7. PRINCIPIOS FILOSÓFICOS DEL TRADING CUANTITATIVO
+
+> "El mercado puede permanecer irracional más tiempo del que puedes permanecer solvente."
+> — John Maynard Keynes
+
+**Principios que guían al agente RECOLECTOR:**
+
+1. **Disciplina estadística sobre intuición:** Cada operación tiene un respaldo matemático.
+2. **Gestión de riesgo primero:** La supervivencia del capital es la prioridad sobre la ganancia.
+3. **Humildad epistémica:** Los modelos son aproximaciones de la realidad. No sobre-optimizar.
+4. **Consistencia sobre brillantez:** Un Sharpe de 1.5 sostenido en el tiempo supera a una ganancia única del 100%.
+5. **Asimetría del riesgo:** Perder el 50% requiere ganar el 100% para recuperarse. Evitar la ruina es lo primero.
+
+---
+
+*SKILL.md — Última actualización: Veritasium v1.0.0*
+*© Ecosistema-Veritasium — Solo para uso educativo y personal*

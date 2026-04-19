@@ -16,13 +16,14 @@ concurrency:
   cancel-in-progress: false   # Nunca cancelar una sesión activa
 
 env:
-  OPENFANG_VERSION: "0.4.2"
+  OPENFANG_VERSION: "0.5.10"
   RUST_LOG: "info"
   CARGO_TERM_COLOR: always
+  PYTHON_VERSION: "3.10"
 
 jobs:
   trade:
-    name: 🧠 OpenFang · Recolector Hand
+    name: 🧠 OpenFang · Multi-Agent Ecosystem
     runs-on: ubuntu-latest
     timeout-minutes: 9   # Evita overlap con el próximo cron
 
@@ -52,6 +53,7 @@ jobs:
           set -euo pipefail
           mkdir -p ~/.local/bin
           echo "⬇️  Descargando OpenFang v${OPENFANG_VERSION}..."
+          # Intento primary: release oficial de OpenFang
           curl -fsSL \
             "https://github.com/openfang-ai/openfang/releases/download/v${OPENFANG_VERSION}/openfang-linux-x86_64.tar.gz" \
             -o /tmp/openfang.tar.gz || {
@@ -90,7 +92,18 @@ jobs:
         run: mkdir -p .veritasium/logs
 
       # ──────────────────────────────────────────────────────────────
-      # 5. Validar secrets antes de operar (fail-fast)
+      # 5. Configurar Python para el Motor Fractal (Agente 3)
+      # ──────────────────────────────────────────────────────────────
+      - name: 🐍 Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+
+      - name: 📦 Install Python dependencies
+        run: pip install polars numpy scipy solana solders base58
+
+      # ──────────────────────────────────────────────────────────────
+      # 6. Validar secrets antes de operar
       # ──────────────────────────────────────────────────────────────
       - name: 🔐 Validate required secrets
         run: |
@@ -98,33 +111,53 @@ jobs:
           [ -z "${{ secrets.GROQ_API_KEY }}" ]        && echo "❌ GROQ_API_KEY not set"        && MISSING=1
           [ -z "${{ secrets.SOLANA_PRIVATE_KEY }}" ]  && echo "❌ SOLANA_PRIVATE_KEY not set"  && MISSING=1
           [ -z "${{ secrets.SOLANA_RPC_URL }}" ]      && echo "❌ SOLANA_RPC_URL not set"       && MISSING=1
+          [ -z "${{ secrets.PROFIT_WALLET }}" ]       && echo "❌ PROFIT_WALLET not set"       && MISSING=1
+          [ -z "${{ secrets.RISK_HUNTER_WALLET }}" ]  && echo "❌ RISK_HUNTER_WALLET not set"  && MISSING=1
           [ $MISSING -eq 1 ] && echo "Configura los secrets en Settings → Secrets and variables → Actions" && exit 1
-          echo "✅ Todos los secrets configurados correctamente."
+          echo "✅ Todos los secrets configurados."
 
       # ──────────────────────────────────────────────────────────────
-      # 6. Ejecutar la mano Recolector en modo headless
+      # 7. EJECUCIÓN MULTITEMPORAL
       # ──────────────────────────────────────────────────────────────
-      - name: 🚀 Run Recolector Hand (headless)
+      
+      # BOT 1: Siempre (Cada 10 min)
+      - name: 🤖 RUN BOT 1: Recolector (10m)
         env:
           GROQ_API_KEY:       ${{ secrets.GROQ_API_KEY }}
           SOLANA_PRIVATE_KEY: ${{ secrets.SOLANA_PRIVATE_KEY }}
           SOLANA_RPC_URL:     ${{ secrets.SOLANA_RPC_URL }}
           PROFIT_WALLET:      ${{ secrets.PROFIT_WALLET }}
+          RISK_HUNTER_WALLET: ${{ secrets.RISK_HUNTER_WALLET }}
           BOT_MODE:           ${{ github.event.inputs.mode || 'live' }}
         run: |
-          echo "🌐 Modo: $BOT_MODE"
-          echo "🕐 Inicio: $(date -u +%Y-%m-%dT%H:%M:%SZ)"
-          openfang run \
-            --hand hands/recolector \
-            --config config.toml \
-            --state .veritasium/state.db \
-            --log-dir .veritasium/logs \
-            --headless \
-            --mode "$BOT_MODE"
-          echo "✅ Ciclo completado: $(date -u +%Y-%m-%dT%H:%M:%SZ)"
+          openfang run --hand hands/recolector --config config.toml --state .veritasium/state.db --headless --mode "$BOT_MODE"
+
+      - name: 🧹 Ejecutar Sweeper de Ganancias
+        if: always()
+        env:
+          SOLANA_PRIVATE_KEY: ${{ secrets.SOLANA_PRIVATE_KEY }}
+          SOLANA_RPC_URL:     ${{ secrets.SOLANA_RPC_URL }}
+          RISK_HUNTER_WALLET: ${{ secrets.RISK_HUNTER_WALLET }}
+        run: |
+          python scripts/wallet_sweeper.py
+
+      # BOT 2 & 3: Solo en el minuto 0 de cada hora
+      - name: 📈 RUN BOT 2 & 3: Multiplicador & Cazador (1h)
+        if: github.event_name == 'workflow_dispatch' || contains(github.event.schedule, '0 * * * *') || endsWith(github.event.head_commit.message, '[run-all]') || (github.run_number % 6 == 0)
+        env:
+          GROQ_API_KEY:       ${{ secrets.GROQ_API_KEY }}
+          SOLANA_PRIVATE_KEY: ${{ secrets.SOLANA_PRIVATE_KEY }}
+          SOLANA_RPC_URL:     ${{ secrets.SOLANA_RPC_URL }}
+          PROFIT_WALLET:      ${{ secrets.PROFIT_WALLET }}
+          RISK_HUNTER_WALLET: ${{ secrets.RISK_HUNTER_WALLET }}
+          BOT_MODE:           ${{ github.event.inputs.mode || 'live' }}
+        run: |
+          echo "🚀 Ejecutando agentes de ciclo largo (1h)..."
+          openfang run --hand hands/multiplicador --config config.toml --state .veritasium/state.db --headless --mode "$BOT_MODE"
+          openfang run --hand hands/cazador --config config.toml --state .veritasium/state.db --headless --mode "$BOT_MODE"
 
       # ──────────────────────────────────────────────────────────────
-      # 7. Subir logs como artefactos descargables
+      # 8. Subir logs
       # ──────────────────────────────────────────────────────────────
       - name: 📊 Upload trading logs
         if: always()
