@@ -53,7 +53,6 @@ jobs:
           set -euo pipefail
           mkdir -p ~/.local/bin
           echo "⬇️  Descargando OpenFang v${OPENFANG_VERSION}..."
-          # Intento primary: release oficial de OpenFang
           curl -fsSL \
             "https://github.com/openfang-ai/openfang/releases/download/v${OPENFANG_VERSION}/openfang-linux-x86_64.tar.gz" \
             -o /tmp/openfang.tar.gz || {
@@ -92,7 +91,7 @@ jobs:
         run: mkdir -p .veritasium/logs
 
       # ──────────────────────────────────────────────────────────────
-      # 5. Configurar Python para el Motor Fractal (Agente 3)
+      # 5. Configurar Python para el Motor Fractal y Scripts
       # ──────────────────────────────────────────────────────────────
       - name: 🐍 Set up Python
         uses: actions/setup-python@v5
@@ -100,7 +99,11 @@ jobs:
           python-version: ${{ env.PYTHON_VERSION }}
 
       - name: 📦 Install Python dependencies
-        run: pip install polars numpy scipy solana solders base58
+        run: |
+          pip install --upgrade pip
+          pip install polars numpy scipy requests \
+                      solana solders base58 \
+                      anchorpy          # Para interacción con programas Anchor (Zeta Markets)
 
       # ──────────────────────────────────────────────────────────────
       # 6. Validar secrets antes de operar
@@ -114,50 +117,86 @@ jobs:
           [ -z "${{ secrets.PROFIT_WALLET }}" ]       && echo "❌ PROFIT_WALLET not set"       && MISSING=1
           [ -z "${{ secrets.RISK_HUNTER_WALLET }}" ]  && echo "❌ RISK_HUNTER_WALLET not set"  && MISSING=1
           [ $MISSING -eq 1 ] && echo "Configura los secrets en Settings → Secrets and variables → Actions" && exit 1
-          echo "✅ Todos los secrets configurados."
+          echo "✅ Secrets obligatorios configurados."
+          # Secrets opcionales (feedback loops Bot2↔Bot1)
+          [ -z "${{ secrets.MAIN_WALLET }}" ]           && echo "⚠️  MAIN_WALLET no set (feedback Bot2→Bot1 desactivado)"
+          [ -z "${{ secrets.MULTIPLICADOR_WALLET }}" ]  && echo "⚠️  MULTIPLICADOR_WALLET no set (inyección post-ZERO_CLAW parcial)"
 
       # ──────────────────────────────────────────────────────────────
-      # 7. EJECUCIÓN MULTITEMPORAL
+      # 7. FASE 0: Cazador analiza criticalidad PRIMERO
+      #    Su señal determina si Bot 2 puede operar este ciclo
       # ──────────────────────────────────────────────────────────────
-      
-      # BOT 1: Siempre (Cada 10 min)
-      - name: 🤖 RUN BOT 1: Recolector (10m)
+      - name: 🦅 FASE 0 — Cazador: análisis fractal (jerarquía de señales)
+        if: github.event_name == 'workflow_dispatch' || (github.run_number % 6 == 0)
         env:
-          GROQ_API_KEY:       ${{ secrets.GROQ_API_KEY }}
-          SOLANA_PRIVATE_KEY: ${{ secrets.SOLANA_PRIVATE_KEY }}
-          SOLANA_RPC_URL:     ${{ secrets.SOLANA_RPC_URL }}
-          PROFIT_WALLET:      ${{ secrets.PROFIT_WALLET }}
-          RISK_HUNTER_WALLET: ${{ secrets.RISK_HUNTER_WALLET }}
-          BOT_MODE:           ${{ github.event.inputs.mode || 'live' }}
+          GROQ_API_KEY:          ${{ secrets.GROQ_API_KEY }}
+          SOLANA_PRIVATE_KEY:    ${{ secrets.SOLANA_PRIVATE_KEY }}
+          SOLANA_RPC_URL:        ${{ secrets.SOLANA_RPC_URL }}
+          PROFIT_WALLET:         ${{ secrets.PROFIT_WALLET }}
+          RISK_HUNTER_WALLET:    ${{ secrets.RISK_HUNTER_WALLET }}
+          MAIN_WALLET:           ${{ secrets.MAIN_WALLET }}
+          MULTIPLICADOR_WALLET:  ${{ secrets.MULTIPLICADOR_WALLET }}
+          BOT_MODE:              ${{ github.event.inputs.mode || 'live' }}
         run: |
-          openfang run --hand hands/recolector --config config.toml --state .veritasium/state.db --headless --mode "$BOT_MODE"
+          echo "🦅 Ejecutando Cazador (análisis fractal + gestión opciones)..."
+          openfang run --hand hands/cazador --config config.toml \
+                       --state .veritasium/state.db --headless --mode "$BOT_MODE"
 
-      - name: 🧹 Ejecutar Sweeper de Ganancias
+      # ──────────────────────────────────────────────────────────────
+      # 8. BOT 1: Recolector — siempre activo, cada 10 minutos
+      # ──────────────────────────────────────────────────────────────
+      - name: 🤖 BOT 1 — Recolector: mean reversion Z-Score
+        env:
+          GROQ_API_KEY:          ${{ secrets.GROQ_API_KEY }}
+          SOLANA_PRIVATE_KEY:    ${{ secrets.SOLANA_PRIVATE_KEY }}
+          SOLANA_RPC_URL:        ${{ secrets.SOLANA_RPC_URL }}
+          PROFIT_WALLET:         ${{ secrets.PROFIT_WALLET }}
+          RISK_HUNTER_WALLET:    ${{ secrets.RISK_HUNTER_WALLET }}
+          MAIN_WALLET:           ${{ secrets.MAIN_WALLET }}
+          BOT_MODE:              ${{ github.event.inputs.mode || 'live' }}
+        run: |
+          echo "🤖 Ejecutando Recolector (mean reversion cada 10min)..."
+          openfang run --hand hands/recolector --config config.toml \
+                       --state .veritasium/state.db --headless --mode "$BOT_MODE"
+
+      # ──────────────────────────────────────────────────────────────
+      # 9. BOT 2: Multiplicador — cada hora (solo si Cazador no bloqueó)
+      # ──────────────────────────────────────────────────────────────
+      - name: 📈 BOT 2 — Multiplicador: trend following + pyramiding
+        if: github.event_name == 'workflow_dispatch' || (github.run_number % 6 == 0)
+        env:
+          GROQ_API_KEY:          ${{ secrets.GROQ_API_KEY }}
+          SOLANA_PRIVATE_KEY:    ${{ secrets.SOLANA_PRIVATE_KEY }}
+          SOLANA_RPC_URL:        ${{ secrets.SOLANA_RPC_URL }}
+          PROFIT_WALLET:         ${{ secrets.PROFIT_WALLET }}
+          RISK_HUNTER_WALLET:    ${{ secrets.RISK_HUNTER_WALLET }}
+          MAIN_WALLET:           ${{ secrets.MAIN_WALLET }}
+          MULTIPLICADOR_WALLET:  ${{ secrets.MULTIPLICADOR_WALLET }}
+          BOT_MODE:              ${{ github.event.inputs.mode || 'live' }}
+        run: |
+          echo "📈 Ejecutando Multiplicador (trend following + pyramiding)..."
+          echo "   (El Bot lee la señal del Cazador en DB antes de operar)"
+          openfang run --hand hands/multiplicador --config config.toml \
+                       --state .veritasium/state.db --headless --mode "$BOT_MODE"
+
+      # ──────────────────────────────────────────────────────────────
+      # 10. Sweeper de capital: distribuye excedentes entre bots
+      # ──────────────────────────────────────────────────────────────
+      - name: 🧹 Sweeper de capital (loops Bot1→Bot3 y Bot2→Bot1)
         if: always()
         env:
-          SOLANA_PRIVATE_KEY: ${{ secrets.SOLANA_PRIVATE_KEY }}
-          SOLANA_RPC_URL:     ${{ secrets.SOLANA_RPC_URL }}
-          RISK_HUNTER_WALLET: ${{ secrets.RISK_HUNTER_WALLET }}
+          SOLANA_PRIVATE_KEY:    ${{ secrets.SOLANA_PRIVATE_KEY }}
+          SOLANA_RPC_URL:        ${{ secrets.SOLANA_RPC_URL }}
+          RISK_HUNTER_WALLET:    ${{ secrets.RISK_HUNTER_WALLET }}
+          PROFIT_WALLET:         ${{ secrets.PROFIT_WALLET }}
+          MAIN_WALLET:           ${{ secrets.MAIN_WALLET }}
+          BOT_MODE:              ${{ github.event.inputs.mode || 'live' }}
         run: |
+          echo "🧹 Ejecutando Wallet Sweeper v2.0..."
           python scripts/wallet_sweeper.py
 
-      # BOT 2 & 3: Solo en el minuto 0 de cada hora
-      - name: 📈 RUN BOT 2 & 3: Multiplicador & Cazador (1h)
-        if: github.event_name == 'workflow_dispatch' || contains(github.event.schedule, '0 * * * *') || endsWith(github.event.head_commit.message, '[run-all]') || (github.run_number % 6 == 0)
-        env:
-          GROQ_API_KEY:       ${{ secrets.GROQ_API_KEY }}
-          SOLANA_PRIVATE_KEY: ${{ secrets.SOLANA_PRIVATE_KEY }}
-          SOLANA_RPC_URL:     ${{ secrets.SOLANA_RPC_URL }}
-          PROFIT_WALLET:      ${{ secrets.PROFIT_WALLET }}
-          RISK_HUNTER_WALLET: ${{ secrets.RISK_HUNTER_WALLET }}
-          BOT_MODE:           ${{ github.event.inputs.mode || 'live' }}
-        run: |
-          echo "🚀 Ejecutando agentes de ciclo largo (1h)..."
-          openfang run --hand hands/multiplicador --config config.toml --state .veritasium/state.db --headless --mode "$BOT_MODE"
-          openfang run --hand hands/cazador --config config.toml --state .veritasium/state.db --headless --mode "$BOT_MODE"
-
       # ──────────────────────────────────────────────────────────────
-      # 8. Subir logs
+      # 11. Subir logs
       # ──────────────────────────────────────────────────────────────
       - name: 📊 Upload trading logs
         if: always()
@@ -168,11 +207,11 @@ jobs:
           retention-days: 7
 
       # ──────────────────────────────────────────────────────────────
-      # 8. Notificación de error (opcional – requiere secret WEBHOOK_URL)
+      # 12. Notificación de error (opcional — requiere WEBHOOK_URL)
       # ──────────────────────────────────────────────────────────────
       - name: 🚨 Notify on failure
         if: failure() && secrets.WEBHOOK_URL != ''
         run: |
           curl -s -X POST "${{ secrets.WEBHOOK_URL }}" \
             -H "Content-Type: application/json" \
-            -d "{\"text\":\"⚠️ Veritasium fallo en run #${{ github.run_number }}. Revisa: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}\"}"
+            -d "{\"text\":\"⚠️ Veritasium falló en run #${{ github.run_number }}. Revisa: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}\"}"

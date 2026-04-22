@@ -169,3 +169,89 @@ id      = "cazador"
 path    = "hands/cazador"
 enabled = true
 description = "Bot 3 — Eventos Extremos (Ley de Potencia)"
+
+# ──────────────────────────────────────────────────────────────
+# FLUJOS DE CAPITAL — EL ECOSISTEMA COMPLETO
+# ──────────────────────────────────────────────────────────────
+# Este mapa documenta los flujos de capital entre los tres bots.
+# Es la implementación técnica de la teoría de portafolios de
+# tres distribuciones no correlacionadas (Normal + Log-Normal + Power Law).
+#
+#  Bot 1 (Recolector)  ──[20% profit]──►  Bot 3 (Cazador / RISK_HUNTER_WALLET)
+#       ▲                                         │
+#       │                               [ZERO_CLAW event: 25%]
+#  [30% profit Bot2]                              │
+#       │                                         ▼
+#  Bot 2 (Multiplicador) ◄──────────────  Inyección masiva de capital
+#       │
+#       └──[40% profit]──► PROFIT_WALLET (acumulación real del usuario)
+#
+# ──────────────────────────────────────────────────────────────
+
+[capital_flows]
+description = "Mapa de distribución de capital entre agentes del ecosistema"
+
+# Bot 1 → Bot 3: financiar el colchón del Cazador
+[capital_flows.bot1_to_bot3]
+trigger         = "trade_profit"
+percentage      = 20.0
+destination     = "RISK_HUNTER_WALLET"
+condition       = "risk_hunter_balance < 0.5 SOL"
+fallback        = "PROFIT_WALLET"     # Si el tanque está lleno, va al usuario
+
+# Bot 2 → Bot 1: refuerzo del margen operativo
+[capital_flows.bot2_to_bot1]
+trigger         = "trade_profit"
+percentage      = 30.0
+destination     = "MAIN_WALLET"
+condition       = "profit_neto > 0.05 SOL"
+purpose         = "Aumentar volumen operativo del Recolector sin aumentar riesgo unitario"
+
+# Bot 2 → Usuario: acumulación real
+[capital_flows.bot2_to_user]
+trigger         = "trade_profit"
+percentage      = 40.0
+destination     = "PROFIT_WALLET"
+
+# Bot 3 → Ecosistema (evento ZERO_CLAW)
+[capital_flows.bot3_zero_claw]
+trigger         = "zero_claw_profit"
+distribution    = { profit_wallet = 50.0, bot1_wallet = 25.0, bot2_wallet = 15.0, self_reserve = 10.0 }
+condition       = "profit > 10x entrada"
+purpose         = "Reescalar todo el ecosistema con las ganancias del evento extremo"
+
+# ──────────────────────────────────────────────────────────────
+# JERARQUÍA DE SEÑALES
+# ──────────────────────────────────────────────────────────────
+# Cuando múltiples bots quieren operar, esta jerarquía decide quién tiene prioridad.
+
+[signal_hierarchy]
+description = "Prioridad de señales entre agentes (mayor número = mayor prioridad)"
+recolector   = 1   # Opera siempre excepto cuando Cazador está activo
+multiplicador = 2  # Opera en tendencias, se detiene ante criticalidad del Cazador
+cazador       = 3  # Prioridad máxima — cuando ZERO_CLAW activa, los demás se detienen
+
+[signal_hierarchy.cazador_override]
+trigger   = "ZERO_CLAW_ATTACK"
+action    = "halt_multiplicador_new_positions"
+action2   = "close_multiplicador_open_positions"
+reason    = "Criticalidad del mercado: el Cazador necesita campo libre para el evento extremo"
+
+# ──────────────────────────────────────────────────────────────
+# SECRETS REQUERIDOS (referencia completa)
+# ──────────────────────────────────────────────────────────────
+# Configurar en: Settings → Secrets and variables → Actions
+#
+#  GROQ_API_KEY           — Clave de Groq (llama-3.3-70b)
+#  SOLANA_PRIVATE_KEY     — Clave privada wallet principal (Bot 1)
+#  SOLANA_RPC_URL         — Endpoint RPC Solana (Helius recomendado)
+#  PROFIT_WALLET          — Dirección pública wallet acumulación usuario
+#  RISK_HUNTER_WALLET     — Dirección pública colchón Bot 3 (wallet separada)
+#  MAIN_WALLET            — Dirección pública Bot 1 (para recibir refuerzo de Bot 2)
+#  MULTIPLICADOR_WALLET   — Dirección pública Bot 2 (para recibir inyección post-ZERO_CLAW)
+#  WEBHOOK_URL            — (Opcional) Discord/Slack para alertas
+
+[secrets]
+required = ["GROQ_API_KEY", "SOLANA_PRIVATE_KEY", "SOLANA_RPC_URL",
+            "PROFIT_WALLET", "RISK_HUNTER_WALLET"]
+optional = ["MAIN_WALLET", "MULTIPLICADOR_WALLET", "WEBHOOK_URL"]
